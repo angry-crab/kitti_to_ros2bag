@@ -31,17 +31,18 @@ import pykitti
 
 import tf_transformations
 
-basedir = '/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_26'
-date = '2011_09_26'
-drive = '0001'
+basedir = '/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_28'
+date = '2011_09_28'
+drive = ['0001','0002']
 
-def save_imu(bag, kitti, imu_frame_id, topic):
+def save_imu(bag, kitti, imu_frame_id, topic, new_topic):
     print("Exporting IMU")
-    imu_topic_info = rosbag2_py._storage.TopicMetadata(
-    name=topic,
-    type='sensor_msgs/msg/Imu',
-    serialization_format='cdr')
-    bag.create_topic(imu_topic_info)
+    if new_topic:
+        imu_topic_info = rosbag2_py._storage.TopicMetadata(
+        name=topic,
+        type='sensor_msgs/msg/Imu',
+        serialization_format='cdr')
+        bag.create_topic(imu_topic_info)
     for timestamp, oxts in zip(kitti.timestamps, kitti.oxts):
         t = float(timestamp.strftime("%s.%f"))
         timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**6))
@@ -63,13 +64,14 @@ def save_imu(bag, kitti, imu_frame_id, topic):
         )
         bag.write(topic, serialize_message(imu_msg), timer.nanoseconds)
     
-def save_pcl(bag, kitti, velo_frame_id, topic):
+def save_pcl(bag, kitti, velo_frame_id, topic, new_topic):
     print("Exporting velodyne data")
-    velo_topic_info = rosbag2_py._storage.TopicMetadata(
-    name=topic,
-    type='sensor_msgs/msg/PointCloud2',
-    serialization_format='cdr')
-    bag.create_topic(velo_topic_info)
+    if new_topic:
+        velo_topic_info = rosbag2_py._storage.TopicMetadata(
+        name=topic,
+        type='sensor_msgs/msg/PointCloud2',
+        serialization_format='cdr')
+        bag.create_topic(velo_topic_info)
     velo_path = os.path.join(kitti.data_path, 'velodyne_points')
     velo_data_dir = os.path.join(velo_path, 'data')
     velo_filenames = sorted(os.listdir(velo_data_dir))
@@ -89,6 +91,24 @@ def save_pcl(bag, kitti, velo_frame_id, topic):
         velo_filename = os.path.join(velo_data_dir, filename)
 
         scan = (np.fromfile(velo_filename, dtype=np.float32)).reshape(-1, 4)
+
+        depth = np.linalg.norm(scan, 2, axis=1)
+        pitch = np.arcsin(scan[:, 2] / depth) # arcsin(z, depth)
+        fov_down = -24.8 / 180.0 * np.pi
+        fov = (abs(-24.8) + abs(2.0)) / 180.0 * np.pi
+        proj_y = (pitch + abs(fov_down)) / fov  # in [0.0, 1.0]
+        proj_y *= 64  # in [0.0, H]
+        proj_y = np.floor(proj_y)
+        proj_y = np.minimum(64 - 1, proj_y)
+        proj_y = np.maximum(0, proj_y).astype(np.int32)  # in [0,H-1]
+        proj_y = proj_y.reshape(-1, 1)
+        scan = np.concatenate((scan,proj_y), axis=1)
+        scan = scan.tolist()
+        for i in range(len(scan)):
+            scan[i][-1] = int(scan[i][-1])
+        # scan = scan[~np.isnan(scan)]
+        # print(scan.shape)
+        
         t = float(datetime.strftime(dt, "%s.%f"))
         # timer = Time(seconds = int(datetime.strftime(dt, "%s")), nanoseconds = int(datetime.strftime(dt, "%f"))*10e7)
         # header = Header(stamp=Time(seconds=int(t // 10**9),nanoseconds=int(t % 10**9)).to_msg(),frame_id=velo_frame_id)
@@ -98,8 +118,10 @@ def save_pcl(bag, kitti, velo_frame_id, topic):
         fields = [PointField(name = 'x', offset = 0, datatype = PointField.FLOAT32, count = 1),
                   PointField(name = 'y', offset = 4, datatype = PointField.FLOAT32, count = 1),
                   PointField(name = 'z', offset = 8, datatype = PointField.FLOAT32, count = 1),
-                  PointField(name = 'intensity', offset = 12, datatype = PointField.FLOAT32, count = 1)]
+                  PointField(name = 'intensity', offset = 12, datatype = PointField.FLOAT32, count = 1),
+                  PointField(name = 'ring', offset = 16, datatype = PointField.UINT16, count = 1)]
         pcl_msg = point_cloud2.create_cloud(header, fields, scan)
+        pcl_msg.is_dense = True
         # pcl_msg = Pcl2(
         #     header = header,
         #     height = 1,
@@ -114,13 +136,14 @@ def save_pcl(bag, kitti, velo_frame_id, topic):
         # bag.write(conn,t,serialize_cdr(pcl_msg,pcl_msg.__msgtype__))
         bag.write(topic, serialize_message(pcl_msg), timer.nanoseconds)
 
-def save_gps_fix(bag, kitti, gps_frame_id, topic):
+def save_gps_fix(bag, kitti, gps_frame_id, topic, new_topic):
     print("Exporting gps fix data")
-    gps_fix_topic_info = rosbag2_py._storage.TopicMetadata(
-    name=topic,
-    type='sensor_msgs/msg/NavSatFix',
-    serialization_format='cdr')
-    bag.create_topic(gps_fix_topic_info)
+    if new_topic:
+        gps_fix_topic_info = rosbag2_py._storage.TopicMetadata(
+        name=topic,
+        type='sensor_msgs/msg/NavSatFix',
+        serialization_format='cdr')
+        bag.create_topic(gps_fix_topic_info)
     for timestamp, oxts in zip(kitti.timestamps, kitti.oxts):
         t = float(timestamp.strftime("%s.%f"))
         timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**6))
@@ -137,14 +160,15 @@ def save_gps_fix(bag, kitti, gps_frame_id, topic):
         )
         bag.write(topic, serialize_message(navsatfix_msg), timer.nanoseconds)
 
-def save_gps_vel(bag, kitti, gps_frame_id, topic):
+def save_gps_vel(bag, kitti, gps_frame_id, topic, new_topic):
     print("Exporting gps vel data")
     # conn = bag.add_connection(topic, TwistStamped.__msgtype__, 'cdr', '')
-    gps_vel_topic_info = rosbag2_py._storage.TopicMetadata(
-    name=topic,
-    type='geometry_msgs/msg/TwistStamped',
-    serialization_format='cdr')
-    bag.create_topic(gps_vel_topic_info)
+    if new_topic:
+        gps_vel_topic_info = rosbag2_py._storage.TopicMetadata(
+        name=topic,
+        type='geometry_msgs/msg/TwistStamped',
+        serialization_format='cdr')
+        bag.create_topic(gps_vel_topic_info)
     for timestamp, oxts in zip(kitti.timestamps, kitti.oxts):
         t = float(timestamp.strftime("%s.%f"))
         timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**6))
@@ -174,7 +198,6 @@ def save_gps_vel(bag, kitti, gps_frame_id, topic):
 # Calibration, timestamps, and IMU data are read automatically. 
 # Camera and velodyne data are available via properties that create generators
 # when accessed, or through getter methods that provide random access.
-kitti = pykitti.raw(basedir, date, drive, frames=None)
 
 # dataset.calib:         Calibration data are accessible as a named tuple
 # dataset.timestamps:    Timestamps are parsed into a list of datetime objects
@@ -227,7 +250,9 @@ kitti = pykitti.raw(basedir, date, drive, frames=None)
 #     # save_gps_fix(writer, kitti, imu_frame_id, gps_fix_topic)
 #     # save_gps_vel(writer, kitti, imu_frame_id, gps_vel_topic)
 #     save_pcl(writer, kitti, velo_frame_id, velo_topic)
-    
+
+kitti = pykitti.raw(basedir, date, drive[0], frames=None)
+
 writer = rosbag2_py.SequentialWriter()
 
 storage_options = rosbag2_py._storage.StorageOptions(
@@ -236,19 +261,29 @@ storage_options = rosbag2_py._storage.StorageOptions(
 converter_options = rosbag2_py._storage.ConverterOptions('', '')
 writer.open(storage_options, converter_options)
 
-velo_topic = '/velodyne'
-velo_frame_id = 'point_cloud'
-save_pcl(writer, kitti, velo_frame_id, velo_topic)
+velo_topic = '/point_cloud'
+velo_frame_id = 'lidar_link'
+save_pcl(writer, kitti, velo_frame_id, velo_topic, True)
 
 imu_topic = '/imu'
 imu_frame_id = 'imu_link'
-save_imu(writer, kitti, imu_frame_id, imu_topic)
+save_imu(writer, kitti, imu_frame_id, imu_topic, True)
 
 gps_fix_topic = '/gps_fix'
-gps_fix_frame_id = 'gnss'
-save_gps_fix(writer, kitti, gps_fix_frame_id, gps_fix_topic)
+gps_fix_frame_id = 'navsat_link'
+save_gps_fix(writer, kitti, gps_fix_frame_id, gps_fix_topic, True)
 
 gps_vel_topic = '/gps_vel'
-gps_vel_frame_id = 'gnss'
-save_gps_vel(writer, kitti, gps_vel_frame_id, gps_vel_topic)
+gps_vel_frame_id = 'navsat_link'
+save_gps_vel(writer, kitti, gps_vel_frame_id, gps_vel_topic, True)
 # writer.close()
+
+kitti = pykitti.raw(basedir, date, drive[1], frames=None)
+
+save_pcl(writer, kitti, velo_frame_id, velo_topic, False)
+
+save_imu(writer, kitti, imu_frame_id, imu_topic, False)
+
+save_gps_fix(writer, kitti, gps_fix_frame_id, gps_fix_topic, False)
+
+save_gps_vel(writer, kitti, gps_vel_frame_id, gps_vel_topic, False)
