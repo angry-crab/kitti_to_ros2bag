@@ -253,37 +253,40 @@ def save_gps_vel(bag, kitti, gps_frame_id, topic, new_topic):
 
 kitti = pykitti.raw(basedir, date, drive[0], frames=None)
 
-writer = rosbag2_py.SequentialWriter()
+for i in range(len(kitti.oxts)):
+    print(kitti.oxts[i].T_w_imu)
 
-storage_options = rosbag2_py._storage.StorageOptions(
-    uri=basedir+"/ros2_bag",
-    storage_id='sqlite3')
-converter_options = rosbag2_py._storage.ConverterOptions('', '')
-writer.open(storage_options, converter_options)
+# writer = rosbag2_py.SequentialWriter()
 
-velo_topic = '/point_cloud'
-velo_frame_id = 'lidar_link'
-save_pcl(writer, kitti, velo_frame_id, velo_topic, True)
+# storage_options = rosbag2_py._storage.StorageOptions(
+#     uri=basedir+"/ros2_bag",
+#     storage_id='sqlite3')
+# converter_options = rosbag2_py._storage.ConverterOptions('', '')
+# writer.open(storage_options, converter_options)
 
-imu_topic = '/imu'
-imu_frame_id = 'imu_link'
-save_imu(writer, kitti, imu_frame_id, imu_topic, True)
+# velo_topic = '/point_cloud'
+# velo_frame_id = 'lidar_link'
+# save_pcl(writer, kitti, velo_frame_id, velo_topic, True)
 
-gps_fix_topic = '/gps_fix'
-gps_fix_frame_id = 'navsat_link'
-save_gps_fix(writer, kitti, gps_fix_frame_id, gps_fix_topic, True)
+# imu_topic = '/imu'
+# imu_frame_id = 'imu_link'
+# save_imu(writer, kitti, imu_frame_id, imu_topic, True)
 
-gps_vel_topic = '/gps_vel'
-gps_vel_frame_id = 'navsat_link'
-save_gps_vel(writer, kitti, gps_vel_frame_id, gps_vel_topic, True)
-# writer.close()
+# gps_fix_topic = '/gps_fix'
+# gps_fix_frame_id = 'navsat_link'
+# save_gps_fix(writer, kitti, gps_fix_frame_id, gps_fix_topic, True)
 
-kitti = pykitti.raw(basedir, date, drive[1], frames=None)
+# gps_vel_topic = '/gps_vel'
+# gps_vel_frame_id = 'navsat_link'
+# save_gps_vel(writer, kitti, gps_vel_frame_id, gps_vel_topic, True)
+# # writer.close()
 
-save_pcl(writer, kitti, velo_frame_id, velo_topic, False)
+# kitti = pykitti.raw(basedir, date, drive[1], frames=None)
 
-save_imu(writer, kitti, imu_frame_id, imu_topic, False)
+# save_pcl(writer, kitti, velo_frame_id, velo_topic, False)
 
-save_gps_fix(writer, kitti, gps_fix_frame_id, gps_fix_topic, False)
+# save_imu(writer, kitti, imu_frame_id, imu_topic, False)
 
-save_gps_vel(writer, kitti, gps_vel_frame_id, gps_vel_topic, False)
+# save_gps_fix(writer, kitti, gps_fix_frame_id, gps_fix_topic, False)
+
+# save_gps_vel(writer, kitti, gps_vel_frame_id, gps_vel_topic, False)

@@ -15,9 +15,9 @@
 // #include <pcl/registration/icp.h>
 // #include <pcl/registration/icp_nl.h>
 #include <pcl/filters/approximate_voxel_grid.h>
-// #include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/filter.h>
-// #include <pcl/registration/ndt.h>
+#include <pcl/registration/ndt.h>
 #include <pclomp/ndt_omp.h>
 #include <pclomp/ndt_omp_impl.hpp>
 
@@ -62,11 +62,54 @@ namespace geodetic
         return uvw2enu(result1[0] - result2[0], result1[1] - result2[1], result1[2] - result2[2], lat0, lon0);
     };
 
+    std::vector<double> se3_translation(double lat, double lon, double h, double scale) {
+        double tx,ty,tz;
+        tx = scale * lon * pi * semimajor_axis / 180.0;
+        ty = scale * semimajor_axis * log(tan((90.0 + lat) * pi / 360.0));
+        tz = h;
+        return {tx,ty,tz};
+    };
+
+    Eigen::Matrix3f rotx(double x) {
+        Eigen::Matrix3f rot;
+        rot.setIdentity();
+        double c = cos(x), s = sin(x);
+        rot(1,1) = c;
+        rot(2,2) = c;
+        rot(1,2) = -s;
+        rot(2,1) = s;
+        return rot;
+    };
+
+    Eigen::Matrix3f roty(double x) {
+        Eigen::Matrix3f rot;
+        rot.setIdentity();
+        double c = cos(x), s = sin(x);
+        rot(0,0) = c;
+        rot(2,2) = c;
+        rot(0,2) = s;
+        rot(2,0) = -s;
+        return rot;
+    };
+
+    Eigen::Matrix3f rotz(double x) {
+        Eigen::Matrix3f rot;
+        rot.setIdentity();
+        double c = cos(x), s = sin(x);
+        rot(0,0) = c;
+        rot(1,1) = c;
+        rot(0,1) = -s;
+        rot(1,0) = s;
+        return rot;
+    };
+
 }
 
 namespace pcd_mapping
 {
     const int length = 10;
+    static bool init = false;
+    double lat0 = 0.0, lon0 = 0.0, h0 = 0.0, scale = 0.0, x0 = 0.0, y0 =0.0, z0 = 0.0;
     struct Pose{
         double x;
         double y;
@@ -115,14 +158,11 @@ namespace pcd_mapping
     std::vector<Pose> load_poses(std::string path_name) {
         std::vector<Pose> poses;
         int idx = 0;
-        bool init = false;
-        double lat0 = 0.0, lon0 = 0.0, h0 = 0.0;
         std::string file_name = path_name + "/" + pad_name(idx) + ".txt";
         // std::cout << "Path :" << file_name << std::endl;
         std::ifstream infile(file_name, std::ifstream::in);
         while(infile.good()) {
             std::string line;
-            // std::cout << "Go" << std::endl;
             std::getline(infile, line);
             std::stringstream ss(line);
             Pose p;
@@ -145,17 +185,28 @@ namespace pcd_mapping
             p.linear_y = std::stod(tmp);
             ss >> tmp;
             p.linear_z = std::stod(tmp);
+
+            // std::cout << std::setprecision(10) << p.lat << " " << p.lon << " " << p.alt << " " << p.roll << " " << p.pitch << " " << p.yaw << std::endl;
+
             if(!init) {
+                std::cout << "Initialize" << std::endl;
                 init = true;
                 lat0 = p.lat;
                 lon0 = p.lon;
                 h0 = p.alt;
+                scale = cos(lat0 * geodetic::pi / 180.0);
+                // std::vector<double> t = geodetic::geodetic2enu(p.lat, p.lon, p.alt, lat0, lon0, h0);
+                std::vector<double> t = geodetic::se3_translation(lat0, lon0, h0, scale);
+                x0 = t[0];
+                y0 = t[1];
+                z0 = t[2];
             }
 
-            std::vector<double> enu = geodetic::geodetic2enu(p.lat, p.lon, p.alt, lat0, lon0, h0);
-            p.x = enu[0];
-            p.y = enu[1];
-            p.z = enu[2];
+            // std::vector<double> enu = geodetic::geodetic2enu(p.lat, p.lon, p.alt, lat0, lon0, h0);
+            std::vector<double> enu = geodetic::se3_translation(p.lat, p.lon, p.alt, scale);
+            p.x = enu[0] - x0;
+            p.y = enu[1] - y0;
+            p.z = enu[2] - z0;
 
             poses.push_back(p);
             infile.close();
@@ -186,80 +237,122 @@ bool process_track(std::string pose_path, std::string pcd_path, Ptr map) {
     std::vector<pcd_mapping::Pose> poses = pcd_mapping::load_poses(pose_path);
 
     for(int i = 0;i < poses.size(); i++) {
+        // std::string write_name = "/home/xinyuwang/adehome/kitti_to_ros2bag/velodyne_points/pcd/" + pcd_mapping::pad_name(i) + ".pcd";
         std::string pcd_name = pcd_path + "/" + pcd_mapping::pad_name(i) + ".bin";
+        // std::string map_path = "/home/xinyuwang/adehome/kitti_to_ros2bag/test/";
         Ptr cloud = pcd_mapping::read_cloud(pcd_name);
+        // pcl::io::savePCDFileASCII(write_name, *cloud);
         Ptr filtered_cloud (new PointCloud);
         pcl::ApproximateVoxelGrid<PointType> filter;
-        filter.setLeafSize (0.4, 0.4, 0.4);
+        filter.setLeafSize (0.2, 0.2, 0.2);
         filter.setInputCloud (cloud);
         filter.filter (*filtered_cloud);
         pcd_mapping::Pose p = poses[i];
-        Eigen::AngleAxisf yawAngle(p.roll, Eigen::Vector3f::UnitZ());
-        Eigen::AngleAxisf pitchAngle(p.yaw, Eigen::Vector3f::UnitY());
-        Eigen::AngleAxisf rollAngle(p.pitch, Eigen::Vector3f::UnitX());
+        // Eigen::AngleAxisf rollAngle(p.roll, Eigen::Vector3f::UnitX());
+        // Eigen::AngleAxisf pitchAngle(p.pitch, Eigen::Vector3f::UnitY());
+        // Eigen::AngleAxisf yawAngle(p.yaw, Eigen::Vector3f::UnitZ());
 
-        Eigen::Quaternion<float> q = rollAngle * pitchAngle * yawAngle;
+        // std::cout << rollAngle.toRotationMatrix() << std::endl;
 
-        Eigen::Matrix3f rotation = q.matrix();
+        // std::cout << pitchAngle.toRotationMatrix() << std::endl;
+
+        // std::cout << yawAngle.toRotationMatrix() << std::endl;
+
+        // Eigen::Quaternion<float> q = rollAngle * pitchAngle * yawAngle;
+
+        // Eigen::Matrix3f rotation = q.matrix();
+
+        // if(i > 0) {
+        // rotation.setIdentity();
+        // }
+
+        Eigen::Matrix3f rollAngle = geodetic::rotx(p.roll);
+        Eigen::Matrix3f pitchAngle = geodetic::roty(p.pitch);
+        Eigen::Matrix3f yawAngle = geodetic::rotz(p.yaw);
+
+        Eigen::Matrix3f rotation = yawAngle * (pitchAngle * rollAngle);
+
         Eigen::Matrix4f trans;
         trans.setIdentity();
         trans.block<3,3>(0,0) = rotation;
         Eigen::Vector3f translation(p.x, p.y, p.z);
+
+        std::cout << translation << std::endl;
+
         trans.block<3,1>(0,3) = translation;
         
-        std::cout << trans << std::endl;
+        // std::cout << trans << std::endl;
+
+        // trans.setIdentity();
         // Ptr trans_cloud(new PointCloud);
         // pcl::transformPointCloud(*cloud, *trans_cloud, trans);
-        if(map->size() == 0) {
-            Ptr trans_cloud(new PointCloud);
-            pcl::transformPointCloud(*filtered_cloud, *trans_cloud, trans);
-            *map += *trans_cloud;
-        }
-        else {
-            // pcl::NormalDistributionsTransform<PointType, PointType> ndt;
-            pclomp::NormalDistributionsTransform<PointType, PointType> ndt;
-            ndt.setTransformationEpsilon (0.01);
-            ndt.setStepSize (0.1);
-            ndt.setResolution (1.0);
-            ndt.setMaximumIterations (15);
-            ndt.setInputSource (filtered_cloud);
-            ndt.setInputTarget (map);
-            ndt.setNumThreads(8);
-            Ptr out_cloud(new PointCloud);
-            ndt.align(*out_cloud, trans);
-            pcl::transformPointCloud(*filtered_cloud, *out_cloud, ndt.getFinalTransformation());
-            *map += *out_cloud;
+        // if(map->size() == 0) {
+        Ptr trans_cloud(new PointCloud);
+        pcl::transformPointCloud(*filtered_cloud, *trans_cloud, trans);
+        *map += *trans_cloud;
+        // }
+        // else {
+        //     pcl::NormalDistributionsTransform<PointType, PointType> ndt;
+        //     // pclomp::NormalDistributionsTransform<PointType, PointType> ndt;
+        //     ndt.setTransformationEpsilon (0.05);
+        //     ndt.setStepSize (0.1);
+        //     ndt.setResolution (0.5);
+        //     ndt.setMaximumIterations (20);
+        //     ndt.setInputSource (filtered_cloud);
+        //     ndt.setInputTarget (map);
+        //     // ndt.setNumThreads(8);
+        //     Ptr out_cloud(new PointCloud);
+        //     ndt.align(*out_cloud, trans);
+        //     pcl::transformPointCloud(*filtered_cloud, *out_cloud, ndt.getFinalTransformation());
+        //     *map += *out_cloud;
 
-        }
+        // }
 
         std::cout << "Map size : " << map->size() << std::endl;
 
+        // Ptr filtered_map (new PointCloud);
+        // pcl::VoxelGrid<PointType> voxel_filter;
+        // voxel_filter.setLeafSize (1.0, 1.0, 1.0);
+        // voxel_filter.setInputCloud (map);
+        // voxel_filter.filter (*filtered_map);
+        // std::string write_name = map_path + std::to_string(i) + ".pcd";
+        // pcl::io::savePCDFileASCII(write_name, *filtered_map);
+
     }
 
-    std::cout << "Pose size: " << poses.size() << std::endl;
+    // std::cout << "Pose size: " << poses.size() << std::endl;
+    return true;
 }
 
 int main() {
-    std::string pose_path = "/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_28/2011_09_28/2011_09_28_drive_0001_sync/oxts/data";
+    std::vector<std::string> pose_paths{
+        "/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_28/2011_09_28/2011_09_28_drive_0001_sync/oxts/data",
+        "/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_28/2011_09_28/2011_09_28_drive_0002_sync/oxts/data"};
+    std::vector<std::string> pcd_paths{
+        "/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_28/2011_09_28/2011_09_28_drive_0001_sync/velodyne_points/data",
+        "/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_28/2011_09_28/2011_09_28_drive_0002_sync/velodyne_points/data"};
     
-    // for(auto& it : result) {
-    //     std::cout << it.lat << " " << it.lon << " " << it.alt << " " << it.roll << " " << it.pitch << " " << it.yaw << std::endl;
-    // }
+    // std::string pose_path = "/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_28/2011_09_28/2011_09_28_drive_0001_sync/oxts/data";
 
-    std::string pcd_path = "/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_28/2011_09_28/2011_09_28_drive_0001_sync/velodyne_points/data";
+    // std::string pcd_path = "/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_28/2011_09_28/2011_09_28_drive_0001_sync/velodyne_points/data";
 
     Ptr map(new PointCloud);
 
-    if(process_track(pose_path, pcd_path, map)) {
-        std::cerr << pose_path << " Failed" << std::endl;
-    }
+    // for(int i=0; i < pose_paths.size(); i++) {
+        if(!process_track(pose_paths[0], pcd_paths[0], map)) {
+            std::cerr << pose_paths[0] << " Failed" << std::endl;
+        }
+        Ptr filtered_map (new PointCloud);
+        pcl::VoxelGrid<PointType> voxel_filter;
+        voxel_filter.setLeafSize (0.7, 0.7, 0.7);
+        voxel_filter.setInputCloud (map);
+        voxel_filter.filter (*filtered_map);
+        map.swap(filtered_map);
+        // pcl::io::savePCDFileASCII("/home/xinyuwang/adehome/kitti_to_ros2bag/map.pcd", *filtered_map);
+        std::cout << "After map size: " << map->size() << std::endl;
+    // }
 
-    Ptr filtered_map (new PointCloud);
-    pcl::ApproximateVoxelGrid<PointType> approximate_voxel_filter;
-    approximate_voxel_filter.setLeafSize (0.5, 0.5, 0.5);
-    approximate_voxel_filter.setInputCloud (map);
-    approximate_voxel_filter.filter (*filtered_map);
-    pcl::io::savePCDFileASCII("/home/xinyuwang/adehome/kitti_to_ros2bag/map.pcd", *filtered_map);
+    pcl::io::savePCDFileASCII("/home/xinyuwang/adehome/kitti_to_ros2bag/map.pcd", *map);
 
     return 0;
 }
