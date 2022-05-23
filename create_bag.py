@@ -24,16 +24,17 @@ from rclpy.serialization import serialize_message
 from sensor_msgs_py import point_cloud2
 from sensor_msgs.msg import PointField, Imu, NavSatFix, NavSatStatus
 from std_msgs.msg import Header
-from geometry_msgs.msg import Vector3, Quaternion, Twist, TwistStamped
+from geometry_msgs.msg import Vector3, Quaternion, Twist, TwistWithCovariance, TwistWithCovarianceStamped
+from rosgraph_msgs.msg import Clock
 from rclpy.time import Time
 
 import pykitti
 
 import tf_transformations
 
-basedir = '/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_28'
-date = '2011_09_28'
-drive = ['0001','0002']
+basedir = '/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_26'
+date = '2011_09_26'
+drive = ['0023']
 
 def save_imu(bag, kitti, imu_frame_id, topic, new_topic):
     print("Exporting IMU")
@@ -45,14 +46,16 @@ def save_imu(bag, kitti, imu_frame_id, topic, new_topic):
         bag.create_topic(imu_topic_info)
     for timestamp, oxts in zip(kitti.timestamps, kitti.oxts):
         t = float(timestamp.strftime("%s.%f"))
-        timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**6))
+        timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**9))
         head = Header(stamp=timer.to_msg(),frame_id=imu_frame_id)
         q = tf_transformations.quaternion_from_euler(oxts.packet.roll, oxts.packet.pitch, oxts.packet.yaw)
         quaternion = Quaternion(x = q[0], y = q[1], z = q[2], w = q[3])
         angular_velocity = Vector3(x = oxts.packet.wf, y = oxts.packet.wl, z = oxts.packet.wu)
         linear_acceleration = Vector3(x = oxts.packet.af, y = oxts.packet.al, z = oxts.packet.au)
-        cov = np.zeros((9,))
-        # cov[0,0] = cov[1,1] = cov[2,2] = 0.00001
+        # cov = np.zeros((9,))
+        cov = np.zeros((3,3))
+        cov[0,0] = cov[1,1] = cov[2,2] = 0.00001
+        cov = np.reshape(cov,(9,))
         imu_msg = Imu(
             header = head,
             orientation = quaternion,
@@ -112,7 +115,7 @@ def save_pcl(bag, kitti, velo_frame_id, topic, new_topic):
         t = float(datetime.strftime(dt, "%s.%f"))
         # timer = Time(seconds = int(datetime.strftime(dt, "%s")), nanoseconds = int(datetime.strftime(dt, "%f"))*10e7)
         # header = Header(stamp=Time(seconds=int(t // 10**9),nanoseconds=int(t % 10**9)).to_msg(),frame_id=velo_frame_id)
-        timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**6))
+        timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**9))
         header = Header(stamp=timer.to_msg(),frame_id=velo_frame_id)
 
         fields = [PointField(name = 'x', offset = 0, datatype = PointField.FLOAT32, count = 1),
@@ -146,7 +149,7 @@ def save_gps_fix(bag, kitti, gps_frame_id, topic, new_topic):
         bag.create_topic(gps_fix_topic_info)
     for timestamp, oxts in zip(kitti.timestamps, kitti.oxts):
         t = float(timestamp.strftime("%s.%f"))
-        timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**6))
+        timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**9))
         # timer = Time(seconds = int(timestamp.strftime("%s")), nanoseconds = int(timestamp.strftime("%f"))*10e7)
         header = Header(stamp=timer.to_msg(),frame_id=gps_frame_id)
         navsatfix_msg = NavSatFix(
@@ -166,12 +169,12 @@ def save_gps_vel(bag, kitti, gps_frame_id, topic, new_topic):
     if new_topic:
         gps_vel_topic_info = rosbag2_py._storage.TopicMetadata(
         name=topic,
-        type='geometry_msgs/msg/TwistStamped',
+        type='geometry_msgs/msg/TwistWithCovarianceStamped',
         serialization_format='cdr')
         bag.create_topic(gps_vel_topic_info)
     for timestamp, oxts in zip(kitti.timestamps, kitti.oxts):
-        t = float(timestamp.strftime("%s.%f"))
-        timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**6))
+        t = float(timestamp.strftime("%s.%f")) - 0.1
+        timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**9))
         # timer = Time(seconds = int(timestamp.strftime("%s")), nanoseconds = int(timestamp.strftime("%f"))*10e7)
         header = Header(stamp=timer.to_msg(),frame_id=gps_frame_id)
         # t = float(timestamp.strftime("%s.%f"))
@@ -187,12 +190,84 @@ def save_gps_vel(bag, kitti, gps_frame_id, topic, new_topic):
         twist = Twist(
             linear = linear,
             angular = angular)
-        twist_msg = TwistStamped(
-            header = header,
+        # twist_msg = TwistStamped(
+        #     header = header,
+        #     twist = twist,
+        # )
+        cov = np.zeros((6,6))
+        cov[0,0] = cov[1,1] = cov[2,2] = cov[3,3] = cov[4,4] = cov[5,5] = 0.00001
+        cov = np.reshape(cov,(36,))
+        twist_cov = TwistWithCovariance(
             twist = twist,
+            covariance = cov
+        )
+        twist_msg = TwistWithCovarianceStamped(
+            header = header,
+            twist = twist_cov
         )
         bag.write(topic, serialize_message(twist_msg), timer.nanoseconds)
 
+def save_clock(bag, kitti, topic, new_topic):
+    print("creating clock data")
+    # conn = bag.add_connection(topic, TwistStamped.__msgtype__, 'cdr', '')
+    if new_topic:
+        clock_topic_info = rosbag2_py._storage.TopicMetadata(
+        name=topic,
+        type='rosgraph_msgs/msg/Clock',
+        serialization_format='cdr')
+        bag.create_topic(clock_topic_info)
+    start, end = kitti.timestamps[0], kitti.timestamps[-1]
+    t = float(start.strftime("%s.%f"))
+    nt = float(end.strftime("%s.%f"))
+    ts = np.arange(t,nt+0.2,0.1)
+    # print(len(ts))
+    np.set_printoptions(suppress=False,
+        formatter={'float_kind': '{:f}'.format})
+    # print(ts)
+    for cur_t in ts:
+        timer = Time(seconds = int(cur_t), nanoseconds = int((cur_t - int(cur_t))* 10**9))
+        clock_msg = Clock(
+            clock = timer.to_msg(),
+        )
+        # print("Sec: %d, Nanosec: %d, Cur_t: %f" % (clock_msg.clock.sec, clock_msg.clock.nanosec, cur_t))
+        bag.write(topic, serialize_message(clock_msg), timer.nanoseconds)
+    # first = True
+    # timestamps = kitti.timestamps
+    # for i in range(len(timestamps)-1):
+    # # for i in range(2):
+    #     t = float(timestamps[i].strftime("%s.%f"))
+    #     nt = float(timestamps[i+1].strftime("%s.%f"))
+    #     # step = (nt - t) / interval
+    #     if first:
+    #         tt = t - 0.1
+    #         first_timer = Time(seconds = int(tt), nanoseconds = int((tt - int(tt))* 10**6))
+    #         first_msg = Clock(
+    #             clock = first_timer.to_msg(),
+    #         )
+    #         bag.write(topic, serialize_message(first_msg), first_timer.nanoseconds)
+    #         first = False
+    #     # for j in range(interval):
+    #     #     cur_t = t + j / interval * step 
+    #     ts = np.arange(t,nt,0.1)
+    #     for cur_t in ts:
+    #         timer = Time(seconds = int(cur_t), nanoseconds = int((cur_t - int(cur_t))* 10**6))
+    #         clock_msg = Clock(
+    #             clock = timer.to_msg(),
+    #         )
+
+    #         bag.write(topic, serialize_message(clock_msg), timer.nanoseconds)
+    # t = float(timestamps[-1].strftime("%s.%f"))
+    # timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**6))
+    # clock_msg = Clock(
+    #     clock = timer.to_msg(),
+    # )
+    # bag.write(topic, serialize_message(clock_msg), timer.nanoseconds)
+    # last_t = t + 0.001
+    # timer = Time(seconds = int(last_t), nanoseconds = int((last_t - int(last_t))* 10**6))
+    # clock_msg = Clock(
+    #     clock = timer.to_msg(),
+    # )
+    # bag.write(topic, serialize_message(clock_msg), timer.nanoseconds)
 
 # The 'frames' argument is optional - default: None, which loads the whole dataset.
 # Calibration, timestamps, and IMU data are read automatically. 
@@ -253,33 +328,37 @@ def save_gps_vel(bag, kitti, gps_frame_id, topic, new_topic):
 
 kitti = pykitti.raw(basedir, date, drive[0], frames=None)
 
-for i in range(len(kitti.oxts)):
-    print(kitti.oxts[i].T_w_imu)
+# for i in range(len(kitti.oxts)):
+#     print(kitti.oxts[i].T_w_imu)
 
-# writer = rosbag2_py.SequentialWriter()
+writer = rosbag2_py.SequentialWriter()
 
-# storage_options = rosbag2_py._storage.StorageOptions(
-#     uri=basedir+"/ros2_bag",
-#     storage_id='sqlite3')
-# converter_options = rosbag2_py._storage.ConverterOptions('', '')
-# writer.open(storage_options, converter_options)
+storage_options = rosbag2_py._storage.StorageOptions(
+    uri="/home/xinyuwang/adehome/universe_test/kitti/ros2_bag",
+    storage_id='sqlite3')
+converter_options = rosbag2_py._storage.ConverterOptions('', '')
+writer.open(storage_options, converter_options)
 
-# velo_topic = '/point_cloud'
-# velo_frame_id = 'lidar_link'
-# save_pcl(writer, kitti, velo_frame_id, velo_topic, True)
+clock_topic = "/clock"
+save_clock(writer, kitti, clock_topic, True)
 
-# imu_topic = '/imu'
-# imu_frame_id = 'imu_link'
-# save_imu(writer, kitti, imu_frame_id, imu_topic, True)
+velo_topic = '/localization/util/downsample/pointcloud'
+velo_frame_id = 'velodyne_top_base_link'
+save_pcl(writer, kitti, velo_frame_id, velo_topic, True)
 
-# gps_fix_topic = '/gps_fix'
-# gps_fix_frame_id = 'navsat_link'
-# save_gps_fix(writer, kitti, gps_fix_frame_id, gps_fix_topic, True)
+imu_topic = '/sensing/imu/tamagawa/imu_raw'
+imu_frame_id = 'tamagawa/imu_link'
+save_imu(writer, kitti, imu_frame_id, imu_topic, True)
 
-# gps_vel_topic = '/gps_vel'
-# gps_vel_frame_id = 'navsat_link'
-# save_gps_vel(writer, kitti, gps_vel_frame_id, gps_vel_topic, True)
-# # writer.close()
+gps_fix_topic = '/gps_fix'
+gps_fix_frame_id = 'gnss_link'
+save_gps_fix(writer, kitti, gps_fix_frame_id, gps_fix_topic, True)
+
+gps_vel_topic = '/localization/twist_estimator/vehicle_velocity_converter/twist_with_covariance'
+gps_vel_frame_id = 'tamagawa/imu_link'
+save_gps_vel(writer, kitti, gps_vel_frame_id, gps_vel_topic, True)
+
+# writer.close()
 
 # kitti = pykitti.raw(basedir, date, drive[1], frames=None)
 

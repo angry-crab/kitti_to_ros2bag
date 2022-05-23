@@ -203,7 +203,7 @@ namespace pcd_mapping
                 x0 = t[0];
                 y0 = t[1];
                 z0 = t[2];
-                std::cout <<  "scale: " << scale << " x0: " << x0 << " y0: " << y0 << " z0: " << z0 << std::endl;
+                // std::cout <<  "scale: " << scale << " x0: " << x0 << " y0: " << y0 << " z0: " << z0 << std::endl;
             }
 
             // std::vector<double> enu = geodetic::geodetic2enu(p.lat, p.lon, p.alt, lat0, lon0, h0);
@@ -243,7 +243,6 @@ bool process_track(std::string pose_path, std::string pcd_path, Ptr map) {
     for(int i = 0;i < poses.size(); i++) {
         // std::string write_name = "/home/xinyuwang/adehome/kitti_to_ros2bag/velodyne_points/pcd/" + pcd_mapping::pad_name(i) + ".pcd";
         std::string pcd_name = pcd_path + "/" + pcd_mapping::pad_name(i) + ".bin";
-        // std::string map_path = "/home/xinyuwang/adehome/kitti_to_ros2bag/test/";
         Ptr cloud = pcd_mapping::read_cloud(pcd_name);
         // pcl::io::savePCDFileASCII(write_name, *cloud);
         Ptr filtered_cloud (new PointCloud);
@@ -308,6 +307,7 @@ bool process_track(std::string pose_path, std::string pcd_path, Ptr map) {
 
         // std::cout << "Map size : " << map->size() << std::endl;
 
+        // std::string map_path = "/home/xinyuwang/adehome/kitti_to_ros2bag/test/";
         // Ptr filtered_map (new PointCloud);
         // pcl::VoxelGrid<PointType> voxel_filter;
         // voxel_filter.setLeafSize (1.0, 1.0, 1.0);
@@ -340,7 +340,7 @@ int main() {
         }
         Ptr filtered_map (new PointCloud);
         pcl::VoxelGrid<PointType> voxel_filter;
-        voxel_filter.setLeafSize (0.5, 0.5, 0.5);
+        voxel_filter.setLeafSize (0.4, 0.4, 0.4);
         voxel_filter.setInputCloud (map);
         voxel_filter.filter (*filtered_map);
         map.swap(filtered_map);
