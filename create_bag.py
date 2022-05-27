@@ -342,7 +342,7 @@ writer.open(storage_options, converter_options)
 clock_topic = "/clock"
 save_clock(writer, kitti, clock_topic, True)
 
-velo_topic = '/localization/util/downsample/pointcloud'
+velo_topic = '/sensing/lidar/top/rectified/pointcloud'
 velo_frame_id = 'velodyne_top_base_link'
 save_pcl(writer, kitti, velo_frame_id, velo_topic, True)
 
