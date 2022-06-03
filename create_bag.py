@@ -24,7 +24,7 @@ from rclpy.serialization import serialize_message
 from sensor_msgs_py import point_cloud2
 from sensor_msgs.msg import PointField, Imu, NavSatFix, NavSatStatus
 from std_msgs.msg import Header
-from geometry_msgs.msg import Vector3, Quaternion, Twist, TwistWithCovariance, TwistWithCovarianceStamped
+from geometry_msgs.msg import Vector3, Point, Quaternion, Twist, TwistWithCovariance, TwistWithCovarianceStamped, Pose, PoseStamped
 from rosgraph_msgs.msg import Clock
 from rclpy.time import Time
 
@@ -35,6 +35,16 @@ import tf_transformations
 basedir = '/home/xinyuwang/adehome/kitti_bag/kitti_raw/2011_09_26'
 date = '2011_09_26'
 drive = ['0023']
+
+semimajor_axis = 6378137.0
+semiminor_axis = 6356752.31424518
+pi = 3.14159265359
+
+def se3_translation(lat, lon, alt, scale):
+    tx = scale * lon * pi * semimajor_axis / 180.0
+    ty = scale * semimajor_axis * np.log(np.tan((90.0 + lat) * pi / 360.0))
+    tz = alt
+    return [tx, ty, tz]
 
 def save_imu(bag, kitti, imu_frame_id, topic, new_topic):
     print("Exporting IMU")
@@ -207,6 +217,33 @@ def save_gps_vel(bag, kitti, gps_frame_id, topic, new_topic):
         )
         bag.write(topic, serialize_message(twist_msg), timer.nanoseconds)
 
+def save_groud_truth(bag, kitti, pose_frame_id, topic, new_topic):
+    print("Exporting Pose")
+    x0, y0, z0, scale = 0,0,0,0
+    init = False
+    if new_topic:
+        pose_topic_info = rosbag2_py._storage.TopicMetadata(
+        name=topic,
+        type='geometry_msgs/msg/PoseStamped',
+        serialization_format='cdr')
+        bag.create_topic(pose_topic_info)
+    for timestamp, oxts in zip(kitti.timestamps, kitti.oxts):
+        if not init:
+            scale = np.cos(oxts.packet.lat * pi / 180.0)
+            [x0, y0, z0] = se3_translation(oxts.packet.lat, oxts.packet.lon, oxts.packet.alt, scale)
+            init = True
+        t = float(timestamp.strftime("%s.%f"))
+        timer = Time(seconds = int(t), nanoseconds = int((t - int(t))* 10**9))
+        head = Header(stamp=timer.to_msg(),frame_id=pose_frame_id)
+        q = tf_transformations.quaternion_from_euler(oxts.packet.roll, oxts.packet.pitch, oxts.packet.yaw)
+        quaternion = Quaternion(x = q[0], y = q[1], z = q[2], w = q[3])
+        [xx,yy,zz] = se3_translation(oxts.packet.lat, oxts.packet.lon, oxts.packet.alt, scale)
+        p = Point(x = xx-x0, y = yy-y0, z = zz-z0)
+        pose = Pose(position = p, orientation = quaternion)
+        ps_msg = PoseStamped(header = head, pose = pose)
+
+        bag.write(topic, serialize_message(ps_msg), timer.nanoseconds)
+
 def save_clock(bag, kitti, topic, new_topic):
     print("creating clock data")
     # conn = bag.add_connection(topic, TwistStamped.__msgtype__, 'cdr', '')
@@ -349,6 +386,10 @@ save_pcl(writer, kitti, velo_frame_id, velo_topic, True)
 imu_topic = '/sensing/imu/tamagawa/imu_raw'
 imu_frame_id = 'tamagawa/imu_link'
 save_imu(writer, kitti, imu_frame_id, imu_topic, True)
+
+pose_topic = '/groud_truth'
+pose_frame_id = 'odom'
+save_groud_truth(writer, kitti, pose_frame_id, pose_topic, True)
 
 gps_fix_topic = '/gps_fix'
 gps_fix_frame_id = 'gnss_link'

@@ -255,7 +255,7 @@ bool process_track(std::string pose_path, std::string pcd_path, Ptr map) {
         // Eigen::AngleAxisf pitchAngle_m(p.pitch, Eigen::Vector3f::UnitY());
         // Eigen::AngleAxisf yawAngle_m(p.yaw, Eigen::Vector3f::UnitZ());
 
-        // Eigen::Quaternion<float> q = rollAngle * pitchAngle * yawAngle;
+        // Eigen::Quaternion<float> q = yawAngle * (pitchAngle * rollAngle);
 
         // Eigen::Matrix3f rotation = q.matrix();
 
