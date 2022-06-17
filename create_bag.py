@@ -256,7 +256,7 @@ def save_clock(bag, kitti, topic, new_topic):
     start, end = kitti.timestamps[0], kitti.timestamps[-1]
     t = float(start.strftime("%s.%f"))
     nt = float(end.strftime("%s.%f"))
-    ts = np.arange(t,nt+0.2,0.1)
+    ts = np.arange(t,nt+0.2,0.05)
     # print(len(ts))
     np.set_printoptions(suppress=False,
         formatter={'float_kind': '{:f}'.format})
@@ -387,7 +387,7 @@ imu_topic = '/sensing/imu/tamagawa/imu_raw'
 imu_frame_id = 'tamagawa/imu_link'
 save_imu(writer, kitti, imu_frame_id, imu_topic, True)
 
-pose_topic = '/groud_truth'
+pose_topic = '/ground_truth'
 pose_frame_id = 'odom'
 save_groud_truth(writer, kitti, pose_frame_id, pose_topic, True)
 
